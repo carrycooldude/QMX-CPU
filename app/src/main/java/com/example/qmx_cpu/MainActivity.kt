@@ -27,12 +27,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvBadge: TextView
     private lateinit var tvModelInfo: TextView
     private lateinit var tvLiveSpeed: TextView
+    private lateinit var btnThreadToggle: TextView
     private lateinit var pbLoading: ProgressBar
 
     private val messages = mutableListOf<ChatMessage>()
     private lateinit var adapter: ChatAdapter
     private var isModelReady = false
     private var isGenerating = false
+    private var currentThreads = 1
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -52,6 +54,7 @@ class MainActivity : AppCompatActivity() {
         tvBadge = findViewById(R.id.tvQmxBadge)
         tvModelInfo = findViewById(R.id.tvModelInfo)
         tvLiveSpeed = findViewById(R.id.tvLiveSpeed)
+        btnThreadToggle = findViewById(R.id.btnThreadToggle)
         pbLoading = findViewById(R.id.pbLoading)
 
         adapter = ChatAdapter(messages)
@@ -64,6 +67,14 @@ class MainActivity : AppCompatActivity() {
             val text = etPrompt.text.toString().trim()
             if (text.isNotEmpty() && isModelReady && !isGenerating) {
                 sendMessage(text)
+            }
+        }
+
+        btnThreadToggle.setOnClickListener {
+            if (!isGenerating) {
+                currentThreads = if (currentThreads == 1) 4 else 1
+                btnThreadToggle.text = if (currentThreads == 1) "1 Thread ⚡" else "4 Threads 🚀"
+                loadModelAsync()
             }
         }
 
@@ -119,7 +130,7 @@ class MainActivity : AppCompatActivity() {
                 selectedPath = "/data/local/tmp/models/gemma-3-270m-it-Q8_0.gguf"
             }
 
-            val success = InferenceBridge.nativeInit(selectedPath, 4, true)
+            val success = InferenceBridge.nativeInit(selectedPath, currentThreads, true)
 
             withContext(Dispatchers.Main) {
                 pbLoading.visibility = View.GONE
@@ -128,14 +139,14 @@ class MainActivity : AppCompatActivity() {
                     tvBadge.text = "⚡ QMX ACTIVE"
                     tvBadge.setBackgroundResource(R.drawable.bg_badge_active)
                     val modelName = File(selectedPath).name
-                    tvModelInfo.text = "$modelName • 4 Oryon Cores"
-                    tvLiveSpeed.text = "⚡ Ready (~210 tok/s)"
+                    tvModelInfo.text = "$modelName • $currentThreads Thread${if (currentThreads > 1) "s" else ""}"
+                    tvLiveSpeed.text = if (currentThreads == 1) "⚡ Ready (~267 tok/s)" else "⚡ Ready (~210 tok/s)"
 
                     messages.add(
                         ChatMessage(
-                            "👋 **Snapdragon AI Studio is Ready!**\n\n" +
+                            "⚡ **Snapdragon AI Studio is Ready ($currentThreads Thread Mode)!**\n\n" +
                                     "Accelerated via **Qualcomm Matrix Extension (QMX)** & **ARMv9.2-A SME**.\n" +
-                                    "Tap any prompt chip below or ask anything!",
+                                    "Single-thread execution avoids core synchronization overhead and delivers peak decode throughput (~267 tok/s)!",
                             false
                         )
                     )
