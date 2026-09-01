@@ -1,0 +1,25 @@
+# Built binaries and temporary files
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+app/build
+captures
+.externalNativeBuild
+.cxx
+app/.cxx
+local.properties
+
+# Exclude large GGUF model files (exceeds GitHub 100MB limit)
+models/
+*.gguf
+
+# Exclude build output trees
+llama.cpp/build/
+llama.cpp/
+kleidiai/
+
+# Exclude APKs
+*.apk

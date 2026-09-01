@@ -1,0 +1,15 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme with NoActionBar -->
+    <style name="Theme.QMXCPU" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Status bar and navigation bar colors -->
+        <item name="android:statusBarColor">#0B0F19</item>
+        <item name="android:navigationBarColor">#0B0F19</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        
+        <!-- Brand colors -->
+        <item name="colorPrimary">#38BDF8</item>
+        <item name="colorSecondary">#10B981</item>
+        <item name="android:windowBackground">#0B0F19</item>
+    </style>
+</resources>
