@@ -4,6 +4,9 @@
 [![Hardware: Snapdragon SM8850 / Oryon CPU](https://img.shields.io/badge/Hardware-Snapdragon%20SM8850%20(Oryon)-blue.svg)](https://www.qualcomm.com)
 [![ISA: ARMv9.2-A SME](https://img.shields.io/badge/ISA-ARMv9.2--A%20SME%20%2B%20SVE2-orange.svg)](https://developer.arm.com)
 [![Engine: llama.cpp + KleidiAI](https://img.shields.io/badge/Engine-llama.cpp%20%2B%20KleidiAI-red.svg)](https://github.com/ggml-org/llama.cpp)
+[![Download APK](https://img.shields.io/badge/Download-APK%20(v1.0.0)-brightgreen.svg?logo=android)](https://github.com/carrycooldude/QMX-CPU/releases/tag/v1.0.0)
+
+[📥 **Download Latest Release APK (v1.0.0)**](https://github.com/carrycooldude/QMX-CPU/releases/download/v1.0.0/QMX-CPU-Chat-v1.0.0.apk)
 
 A fully native, on-device Android chat application and benchmarking suite accelerated via **Qualcomm Matrix Extension (QMX)** and **ARM Scalable Matrix Extension (SME)** on Qualcomm Snapdragon Oryon CPU cores.
 
