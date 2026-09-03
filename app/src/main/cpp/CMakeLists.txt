@@ -4,10 +4,12 @@ project("qmx_native")
 
 set(CMAKE_CXX_STANDARD 17)
 
-# Include directories for llama.cpp and ggml headers
+# Include directories for llama.cpp, ggml, and mtmd headers
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../llama.cpp/include
     ${CMAKE_CURRENT_SOURCE_DIR}/../../../../llama.cpp/ggml/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../llama.cpp/tools/mtmd
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../llama.cpp/common
 )
 
 # Prebuilt library path
@@ -28,6 +30,14 @@ set_target_properties(ggml PROPERTIES IMPORTED_LOCATION ${JNI_LIBS_DIR}/libggml.
 add_library(omp SHARED IMPORTED)
 set_target_properties(omp PROPERTIES IMPORTED_LOCATION ${JNI_LIBS_DIR}/libomp.so)
 
+# TTS: mtmd multimodal library (Qwen3-TTS audio generation)
+add_library(mtmd SHARED IMPORTED)
+set_target_properties(mtmd PROPERTIES IMPORTED_LOCATION ${JNI_LIBS_DIR}/libmtmd.so)
+
+# TTS: llama-common (required by mtmd for param parsing and sampling)
+add_library(llama-common SHARED IMPORTED)
+set_target_properties(llama-common PROPERTIES IMPORTED_LOCATION ${JNI_LIBS_DIR}/libllama-common.so)
+
 # Native JNI shared library
 add_library(qmx_native SHARED
     native-lib.cpp
@@ -35,6 +45,8 @@ add_library(qmx_native SHARED
 
 target_link_libraries(qmx_native
     llama
+    llama-common
+    mtmd
     ggml-cpu
     ggml-base
     ggml

@@ -53,6 +53,8 @@ android {
         jniLibs {
             pickFirsts.add("lib/**/libomp.so")
             pickFirsts.add("lib/**/libllama.so")
+            pickFirsts.add("lib/**/libllama-common.so")
+            pickFirsts.add("lib/**/libmtmd.so")
             pickFirsts.add("lib/**/libggml-cpu.so")
             pickFirsts.add("lib/**/libggml-base.so")
             pickFirsts.add("lib/**/libggml.so")
