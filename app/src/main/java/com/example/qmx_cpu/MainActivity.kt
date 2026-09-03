@@ -315,9 +315,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
 
             val candidatePaths = listOf(
+                "/data/local/tmp/models/gemma-3-270m-it-Q4_0.gguf",
+                File(getExternalFilesDir(null), "models/gemma-3-270m-it-Q4_0.gguf").absolutePath,
                 "/data/local/tmp/models/gemma-3-270m-it-Q8_0.gguf",
-                File(getExternalFilesDir(null), "models/gemma-3-270m-it-Q8_0.gguf").absolutePath,
-                "/data/local/tmp/models/gemma-3-270m-it-Q4_0.gguf"
+                File(getExternalFilesDir(null), "models/gemma-3-270m-it-Q8_0.gguf").absolutePath
             )
 
             var selectedPath: String? = null
@@ -329,7 +330,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
 
             if (selectedPath == null) {
-                selectedPath = "/data/local/tmp/models/gemma-3-270m-it-Q8_0.gguf"
+                selectedPath = "/data/local/tmp/models/gemma-3-270m-it-Q4_0.gguf"
             }
 
             val success = InferenceBridge.nativeInit(selectedPath, currentThreads, true)
