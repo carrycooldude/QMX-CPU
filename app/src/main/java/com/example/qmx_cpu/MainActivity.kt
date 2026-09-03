@@ -37,7 +37,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var tvModelInfo: TextView
     private lateinit var tvLiveSpeed: TextView
     private lateinit var btnThreadToggle: TextView
+    private lateinit var btnModelToggle: TextView
     private lateinit var pbLoading: ProgressBar
+
+    enum class ModelQuant(val label: String, val filename: String, val kernelDesc: String) {
+        Q4_0("Q4_0", "gemma-3-270m-it-Q4_0.gguf", "Qualcomm 4-Bit QMX Microkernel (MOPA/SDOT)"),
+        Q8_0("Q8_0", "gemma-3-270m-it-Q8_0.gguf", "Qualcomm 8-Bit QMX Microkernel (MOPA)")
+    }
+
+    private var currentModelQuant = ModelQuant.Q4_0
 
     private val messages = mutableListOf<ChatMessage>()
     private lateinit var adapter: ChatAdapter
@@ -80,6 +88,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         tvModelInfo = findViewById(R.id.tvModelInfo)
         tvLiveSpeed = findViewById(R.id.tvLiveSpeed)
         btnThreadToggle = findViewById(R.id.btnThreadToggle)
+        btnModelToggle = findViewById(R.id.btnModelToggle)
         pbLoading = findViewById(R.id.pbLoading)
 
         // Setup ChatAdapter with dual voice callbacks
@@ -113,6 +122,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 currentThreads = if (currentThreads == 1) 4 else 1
                 btnThreadToggle.text = if (currentThreads == 1) "1 Thread ⚡" else "4 Threads 🚀"
                 loadModelAsync()
+            }
+        }
+
+        btnModelToggle.text = "${currentModelQuant.label} ⚡"
+        btnModelToggle.setOnClickListener {
+            if (!isGenerating) {
+                currentModelQuant = if (currentModelQuant == ModelQuant.Q4_0) ModelQuant.Q8_0 else ModelQuant.Q4_0
+                btnModelToggle.text = "${currentModelQuant.label} ⚡"
+                loadModelAsync()
+            } else {
+                Toast.makeText(this, "Please wait for generation to complete", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -304,8 +324,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun loadModelAsync() {
         pbLoading.visibility = View.VISIBLE
-        tvBadge.text = "INITIALIZING..."
+        isModelReady = false
+        tvBadge.text = "LOADING..."
         tvBadge.setBackgroundResource(R.drawable.bg_badge_loading)
+
+        val quant = currentModelQuant
+        btnModelToggle.text = "${quant.label} ⚡"
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -315,10 +339,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
 
             val candidatePaths = listOf(
-                "/data/local/tmp/models/gemma-3-270m-it-Q4_0.gguf",
-                File(getExternalFilesDir(null), "models/gemma-3-270m-it-Q4_0.gguf").absolutePath,
-                "/data/local/tmp/models/gemma-3-270m-it-Q8_0.gguf",
-                File(getExternalFilesDir(null), "models/gemma-3-270m-it-Q8_0.gguf").absolutePath
+                "/data/local/tmp/models/${quant.filename}",
+                File(getExternalFilesDir(null), "models/${quant.filename}").absolutePath
             )
 
             var selectedPath: String? = null
@@ -330,7 +352,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             }
 
             if (selectedPath == null) {
-                selectedPath = "/data/local/tmp/models/gemma-3-270m-it-Q4_0.gguf"
+                selectedPath = "/data/local/tmp/models/${quant.filename}"
             }
 
             val success = InferenceBridge.nativeInit(selectedPath, currentThreads, true)
@@ -341,17 +363,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     isModelReady = true
                     tvBadge.text = "⚡ QMX ACTIVE"
                     tvBadge.setBackgroundResource(R.drawable.bg_badge_active)
+                    btnModelToggle.text = "${quant.label} ⚡"
                     val modelName = File(selectedPath).name
                     tvModelInfo.text = "$modelName • $currentThreads Thread${if (currentThreads > 1) "s" else ""}"
                     tvLiveSpeed.text = if (currentThreads == 1) "⚡ Ready (~267 tok/s)" else "⚡ Ready (~210 tok/s)"
 
                     messages.add(
                         ChatMessage(
-                            "⚡ **Snapdragon AI Studio is Ready ($currentThreads Thread Mode)!**\n\n" +
-                                    "Accelerated via **Qualcomm Matrix Extension (QMX)** & **Oryon CPU Cores**.\n" +
-                                    "Compare voice options below each response:\n" +
-                                    "• 🔊 **System Voice**: Instant (0s) system readout\n" +
-                                    "• 🧠 **Qwen3-TTS**: Real-time neural audio streaming",
+                            "⚡ **Active Model: Gemma 3 270M (${quant.label})!**\n\n" +
+                                    "• **Microkernel**: ${quant.kernelDesc}\n" +
+                                    "• **Hardware Target**: Qualcomm Matrix Extension (SME MOPA) • Oryon Cores\n" +
+                                    "• **Thread Config**: $currentThreads Thread${if (currentThreads > 1) "s" else ""}\n" +
+                                    "• Tap **${quant.label} ⚡** in the top bar to toggle between Q4_0 & Q8_0 anytime.",
                             false
                         )
                     )
@@ -360,7 +383,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 } else {
                     tvBadge.text = "LOAD FAILED"
                     tvBadge.setBackgroundResource(R.drawable.bg_badge_error)
-                    Toast.makeText(this@MainActivity, "Could not load model: $selectedPath", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@MainActivity, "Could not load ${quant.label}: $selectedPath", Toast.LENGTH_LONG).show()
                 }
             }
         }
