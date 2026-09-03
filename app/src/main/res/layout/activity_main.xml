@@ -101,7 +101,7 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:fontFamily="monospace"
-                android:text="⚙️ ARMv9.2-A • SME Matrix Tiles • Oryon CPU"
+                android:text="⚙️ Qualcomm QMX (SME) • Oryon Cores"
                 android:textColor="#38BDF8"
                 android:textSize="11sp" />
 

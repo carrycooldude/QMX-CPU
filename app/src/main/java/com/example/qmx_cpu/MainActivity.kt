@@ -347,7 +347,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     messages.add(
                         ChatMessage(
                             "⚡ **Snapdragon AI Studio is Ready ($currentThreads Thread Mode)!**\n\n" +
-                                    "Accelerated via **Qualcomm Matrix Extension (QMX)** & **ARMv9.2-A SME**.\n" +
+                                    "Accelerated via **Qualcomm Matrix Extension (QMX)** & **Oryon CPU Cores**.\n" +
                                     "Compare voice options below each response:\n" +
                                     "• 🔊 **System Voice**: Instant (0s) system readout\n" +
                                     "• 🧠 **Qwen3-TTS**: Real-time neural audio streaming",
