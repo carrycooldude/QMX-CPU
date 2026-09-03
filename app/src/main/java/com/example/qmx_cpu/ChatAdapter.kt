@@ -3,13 +3,13 @@ package com.example.qmx_cpu
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ImageButton
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 
 class ChatAdapter(
     private val messages: MutableList<ChatMessage>,
-    private val onSpeakClick: ((String) -> Unit)? = null
+    private val onSpeakAndroidClick: ((String) -> Unit)? = null,
+    private val onSpeakQwenClick: ((String) -> Unit)? = null
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     companion object {
@@ -38,13 +38,16 @@ class ChatAdapter(
             holder.tvMessage.text = msg.text
         } else if (holder is AssistantViewHolder) {
             holder.tvMessage.text = msg.text
-            // Show speak button only for completed (non-streaming) assistant messages
+            // Show voice buttons only for completed (non-streaming) assistant messages
             if (msg.isStreaming) {
-                holder.btnSpeak.visibility = View.GONE
+                holder.layoutVoiceActions.visibility = View.GONE
             } else {
-                holder.btnSpeak.visibility = View.VISIBLE
-                holder.btnSpeak.setOnClickListener {
-                    onSpeakClick?.invoke(msg.text)
+                holder.layoutVoiceActions.visibility = View.VISIBLE
+                holder.btnSpeakAndroid.setOnClickListener {
+                    onSpeakAndroidClick?.invoke(msg.text)
+                }
+                holder.btnSpeakQwen.setOnClickListener {
+                    onSpeakQwenClick?.invoke(msg.text)
                 }
             }
         }
@@ -61,7 +64,6 @@ class ChatAdapter(
         payloads: MutableList<Any>
     ) {
         if (payloads.isNotEmpty() && payloads[0] == "text_update") {
-            // Fast path: only update text, skip full rebind
             val msg = messages[position]
             if (holder is AssistantViewHolder) {
                 holder.tvMessage.text = msg.text
@@ -69,7 +71,6 @@ class ChatAdapter(
                 holder.tvMessage.text = msg.text
             }
         } else {
-            // Full rebind (no payload or unknown payload)
             super.onBindViewHolder(holder, position, payloads)
         }
     }
@@ -82,6 +83,8 @@ class ChatAdapter(
 
     class AssistantViewHolder(itemView: View) : RecyclerView.ViewHolder(itemView) {
         val tvMessage: TextView = itemView.findViewById(R.id.tvAssistantMessage)
-        val btnSpeak: ImageButton = itemView.findViewById(R.id.btnSpeak)
+        val layoutVoiceActions: View = itemView.findViewById(R.id.layoutVoiceActions)
+        val btnSpeakAndroid: TextView = itemView.findViewById(R.id.btnSpeakAndroid)
+        val btnSpeakQwen: TextView = itemView.findViewById(R.id.btnSpeakQwen)
     }
 }

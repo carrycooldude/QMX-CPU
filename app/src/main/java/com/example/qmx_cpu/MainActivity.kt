@@ -4,6 +4,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.os.Bundle
+import android.speech.tts.TextToSpeech
 import android.system.Os
 import android.view.View
 import android.widget.EditText
@@ -25,8 +26,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.Locale
 
-class MainActivity : AppCompatActivity() {
+class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private lateinit var rvChat: RecyclerView
     private lateinit var etPrompt: EditText
@@ -43,10 +45,14 @@ class MainActivity : AppCompatActivity() {
     private var isGenerating = false
     private var currentThreads = 1
 
-    // Qwen3-TTS state
-    private var isTtsReady = false
-    private var isTtsSpeaking = false
-    private var isTtsGenerating = false
+    // Engine 1: Android Native System TTS (0s instant playback)
+    private var androidTts: TextToSpeech? = null
+    private var isAndroidTtsReady = false
+
+    // Engine 2: Qwen3-TTS Neural Model (On-Device Streaming PCM)
+    private var isQwenTtsReady = false
+    private var isQwenTtsSpeaking = false
+    private var isQwenTtsGenerating = false
     private var audioTrack: AudioTrack? = null
 
     // Track the current generation job for clean cancellation
@@ -55,6 +61,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        // Initialize Android System TextToSpeech
+        androidTts = TextToSpeech(this, this)
 
         // Handle safe window insets
         val rootLayout = findViewById<View>(R.id.rootLayout)
@@ -73,10 +82,17 @@ class MainActivity : AppCompatActivity() {
         btnThreadToggle = findViewById(R.id.btnThreadToggle)
         pbLoading = findViewById(R.id.pbLoading)
 
-        // Pass the TTS speak callback to the adapter
-        adapter = ChatAdapter(messages) { textToSpeak ->
-            speakWithQwenTts(textToSpeak)
-        }
+        // Setup ChatAdapter with dual voice callbacks
+        adapter = ChatAdapter(
+            messages = messages,
+            onSpeakAndroidClick = { textToSpeak ->
+                speakWithAndroidTts(textToSpeak)
+            },
+            onSpeakQwenClick = { textToSpeak ->
+                speakWithQwenTts(textToSpeak)
+            }
+        )
+
         val layoutManager = LinearLayoutManager(this)
         layoutManager.stackFromEnd = true
         rvChat.layoutManager = layoutManager
@@ -118,76 +134,63 @@ class MainActivity : AppCompatActivity() {
             sendMessage(etPrompt.text.toString())
         }
 
-        // Load Chat Model
+        // Load Chat Model (Gemma)
         loadModelAsync()
 
-        // Load Qwen3-TTS model in background
-        loadTtsAsync()
+        // Load Qwen3-TTS in background (4 threads)
+        loadQwenTtsAsync()
     }
 
-    /**
-     * Load the Qwen3-TTS model (backbone + mmproj) in the background.
-     * This runs alongside the chat model as a separate llama context.
-     */
-    private fun loadTtsAsync() {
-        lifecycleScope.launch(Dispatchers.IO) {
-            val backbonePath = "/data/local/tmp/models/Qwen3-TTS-12Hz-1.7B-Base-Q4_K_M.gguf"
-            val mmprojPath = "/data/local/tmp/models/mmproj-Qwen3-TTS-12Hz-1.7B-Base-Q8_0.gguf"
-
-            val backboneExists = File(backbonePath).exists()
-            val mmprojExists = File(mmprojPath).exists()
-
-            if (!backboneExists || !mmprojExists) {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(
-                        this@MainActivity,
-                        "TTS models not found. Push to /data/local/tmp/models/",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }
-                return@launch
-            }
-
-            val success = InferenceBridge.nativeTtsInit(backbonePath, mmprojPath, 4)
-
-            withContext(Dispatchers.Main) {
-                isTtsReady = success
-                if (success) {
-                    Toast.makeText(this@MainActivity, "🔊 Qwen3-TTS Ready (4 Threads)!", Toast.LENGTH_SHORT).show()
-                }
+    override fun onInit(status: Int) {
+        if (status == TextToSpeech.SUCCESS) {
+            val result = androidTts?.setLanguage(Locale.US)
+            isAndroidTtsReady = result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED
+            if (isAndroidTtsReady) {
+                androidTts?.setSpeechRate(1.08f)
+                androidTts?.setPitch(1.0f)
             }
         }
     }
 
     /**
-     * Speak text aloud using Qwen3-TTS neural model.
-     * Generates WAV audio locally on-device, then plays it via MediaPlayer.
+     * Engine 1: Speak using Android Native System TTS.
+     * Starts in <100ms with zero model overhead.
      */
-    private fun speakWithQwenTts(text: String) {
-        if (!isTtsReady) {
-            Toast.makeText(this, "TTS model not loaded yet", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (isTtsSpeaking) {
-            stopAudioTrack()
-            return
-        }
-        if (isTtsGenerating) {
-            Toast.makeText(this, "Speech generation already in progress...", Toast.LENGTH_SHORT).show()
+    private fun speakWithAndroidTts(text: String) {
+        stopAllAudio()
+
+        if (!isAndroidTtsReady) {
+            Toast.makeText(this, "Android TTS engine initializing...", Toast.LENGTH_SHORT).show()
             return
         }
 
-        // Strip markdown formatting and stats block for cleaner speech
-        val cleanText = text
-            .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")
-            .replace(Regex("\\*(.+?)\\*"), "$1")
-            .replace(Regex("─+.*$", RegexOption.DOT_MATCHES_ALL), "")
-            .replace(Regex("[•⚡🚀💡📱⚙️🔊]"), "")
-            .trim()
-
+        val cleanText = cleanMarkdownText(text)
         if (cleanText.isBlank()) return
 
-        // Take first 1-2 sentences (up to 180 chars) for snappy on-device voice generation
+        Toast.makeText(this, "🔊 Playing System Voice...", Toast.LENGTH_SHORT).show()
+        androidTts?.speak(cleanText, TextToSpeech.QUEUE_FLUSH, null, "android_tts_${System.currentTimeMillis()}")
+    }
+
+    /**
+     * Engine 2: Speak using Qwen3-TTS Neural Model.
+     * Streams 24kHz PCM audio in real-time via AudioTrack.
+     */
+    private fun speakWithQwenTts(text: String) {
+        if (isQwenTtsSpeaking) {
+            stopAllAudio()
+            return
+        }
+
+        stopAllAudio()
+
+        if (!isQwenTtsReady) {
+            Toast.makeText(this, "Qwen3-TTS initializing in background...", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val cleanText = cleanMarkdownText(text)
+        if (cleanText.isBlank()) return
+
         val sentences = cleanText.split(Regex("(?<=[.!?])\\s+"))
         val speechText = if (sentences.isNotEmpty()) {
             sentences.take(2).joinToString(" ").take(180)
@@ -195,8 +198,8 @@ class MainActivity : AppCompatActivity() {
             cleanText.take(180)
         }
 
-        isTtsGenerating = true
-        Toast.makeText(this, "🔊 Streaming Qwen3-TTS audio...", Toast.LENGTH_SHORT).show()
+        isQwenTtsGenerating = true
+        Toast.makeText(this, "🧠 Streaming Qwen3-TTS Neural Voice...", Toast.LENGTH_SHORT).show()
 
         lifecycleScope.launch(Dispatchers.IO) {
             val sampleRate = 24000
@@ -224,7 +227,7 @@ class MainActivity : AppCompatActivity() {
                     .setTransferMode(AudioTrack.MODE_STREAM)
                     .build()
                 audioTrack?.play()
-                isTtsSpeaking = true
+                isQwenTtsSpeaking = true
             } catch (e: Exception) {
                 e.printStackTrace()
             }
@@ -234,7 +237,7 @@ class MainActivity : AppCompatActivity() {
                 "en",
                 object : PcmCallback {
                     override fun onPcmChunk(pcmData: ShortArray) {
-                        if (isTtsSpeaking && audioTrack != null) {
+                        if (isQwenTtsSpeaking && audioTrack != null) {
                             audioTrack?.write(pcmData, 0, pcmData.size)
                         }
                     }
@@ -242,12 +245,11 @@ class MainActivity : AppCompatActivity() {
             )
 
             withContext(Dispatchers.Main) {
-                isTtsGenerating = false
+                isQwenTtsGenerating = false
                 if (!success) {
-                    Toast.makeText(this@MainActivity, "TTS streaming failed", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "Qwen TTS streaming failed", Toast.LENGTH_SHORT).show()
                     stopAudioTrack()
                 } else {
-                    // Audio continues playing buffer; schedule stop after estimated duration
                     lifecycleScope.launch {
                         delay(2500)
                         stopAudioTrack()
@@ -255,6 +257,20 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    private fun cleanMarkdownText(text: String): String {
+        return text
+            .replace(Regex("\\*\\*(.+?)\\*\\*"), "$1")
+            .replace(Regex("\\*(.+?)\\*"), "$1")
+            .replace(Regex("─+.*$", RegexOption.DOT_MATCHES_ALL), "")
+            .replace(Regex("[•⚡🚀💡📱⚙️🔊🧠]"), "")
+            .trim()
+    }
+
+    private fun stopAllAudio() {
+        androidTts?.stop()
+        stopAudioTrack()
     }
 
     private fun stopAudioTrack() {
@@ -265,8 +281,25 @@ class MainActivity : AppCompatActivity() {
             // ignore
         }
         audioTrack = null
-        isTtsSpeaking = false
-        isTtsGenerating = false
+        isQwenTtsSpeaking = false
+        isQwenTtsGenerating = false
+    }
+
+    /**
+     * Load Qwen3-TTS model in the background with 4 threads for fast parallel synthesis.
+     */
+    private fun loadQwenTtsAsync() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            val backbonePath = "/data/local/tmp/models/Qwen3-TTS-12Hz-1.7B-Base-Q4_K_M.gguf"
+            val mmprojPath = "/data/local/tmp/models/mmproj-Qwen3-TTS-12Hz-1.7B-Base-Q8_0.gguf"
+
+            if (File(backbonePath).exists() && File(mmprojPath).exists()) {
+                val success = InferenceBridge.nativeTtsInit(backbonePath, mmprojPath, 4)
+                withContext(Dispatchers.Main) {
+                    isQwenTtsReady = success
+                }
+            }
+        }
     }
 
     private fun loadModelAsync() {
@@ -315,7 +348,9 @@ class MainActivity : AppCompatActivity() {
                         ChatMessage(
                             "⚡ **Snapdragon AI Studio is Ready ($currentThreads Thread Mode)!**\n\n" +
                                     "Accelerated via **Qualcomm Matrix Extension (QMX)** & **ARMv9.2-A SME**.\n" +
-                                    "Tap 🔊 on any response to hear it spoken aloud via **Qwen3-TTS**!",
+                                    "Compare voice options below each response:\n" +
+                                    "• 🔊 **System Voice**: Instant (0s) system readout\n" +
+                                    "• 🧠 **Qwen3-TTS**: Real-time neural audio streaming",
                             false
                         )
                     )
@@ -332,19 +367,14 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Send a message and stream the response with jitter-free token batching.
-     *
-     * Architecture:
-     * - JNI token callback -> Channel (non-blocking, zero UI work)
-     * - UI ticker coroutine drains channel every 60ms -> single notifyItemChanged() per batch
-     * - This reduces ~267 layout passes/sec to ~16, eliminating visual jitter
      */
     private fun sendMessage(promptText: String) {
         etPrompt.setText("")
         isGenerating = true
         btnSend.isEnabled = false
 
-        // Stop any ongoing TTS playback when sending a new message
-        stopAudioTrack()
+        // Stop any ongoing audio playback
+        stopAllAudio()
 
         // Add user message
         messages.add(ChatMessage(promptText, true))
@@ -359,13 +389,13 @@ class MainActivity : AppCompatActivity() {
 
         val streamBuffer = StringBuilder()
 
-        // Unbounded channel: JNI callback just sends tokens here (O(1), non-blocking)
+        // Unbounded channel: JNI callback sends tokens here (O(1), non-blocking)
         val tokenChannel = Channel<String>(Channel.UNLIMITED)
 
         // UI consumer: batched updates at ~16 fps (60ms interval)
         val uiTickerJob = lifecycleScope.launch(Dispatchers.Main) {
             while (isActive) {
-                delay(60) // ~16 UI updates per second
+                delay(60)
                 var chunk = ""
                 while (true) {
                     val piece = tokenChannel.tryReceive().getOrNull() ?: break
@@ -422,7 +452,9 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         generationJob?.cancel()
-        stopAudioTrack()
+        stopAllAudio()
+        androidTts?.shutdown()
+        androidTts = null
         InferenceBridge.nativeTtsFree()
         InferenceBridge.nativeFree()
     }
