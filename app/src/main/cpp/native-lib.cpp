@@ -471,6 +471,141 @@ Java_com_example_qmx_1cpu_InferenceBridge_nativeTtsGenerate(
     return JNI_TRUE;
 }
 
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_example_qmx_1cpu_InferenceBridge_nativeTtsGenerateStream(
+        JNIEnv* env,
+        jobject /* this */,
+        jstring text_j,
+        jstring lang_j,
+        jobject callback) {
+
+    if (!g_tts.is_initialized || !g_tts.model || !g_tts.ctx || !g_tts.mctx) {
+        LOGE("TTS Stream: Not initialized.");
+        return JNI_FALSE;
+    }
+
+    std::unique_lock<std::mutex> lock(g_tts_mutex, std::try_to_lock);
+    if (!lock.owns_lock()) {
+        LOGE("TTS Stream: Another generation is already in progress.");
+        return JNI_FALSE;
+    }
+
+    const char* text = env->GetStringUTFChars(text_j, nullptr);
+    const char* lang = env->GetStringUTFChars(lang_j, nullptr);
+
+    LOGI("TTS Stream: Generating PCM for: '%.80s...' lang=%s", text, lang);
+
+    jclass cb_class = env->GetObjectClass(callback);
+    jmethodID cb_on_pcm = env->GetMethodID(cb_class, "onPcmChunk", "([S)V");
+    if (!cb_on_pcm) {
+        LOGE("TTS Stream: Callback method onPcmChunk not found");
+        env->ReleaseStringUTFChars(text_j, text);
+        env->ReleaseStringUTFChars(lang_j, lang);
+        return JNI_FALSE;
+    }
+
+    mtmd_helper::gen_audio gen(g_tts.ctx, g_tts.mctx);
+
+    mtmd_helper_gen_audio_inp inp{};
+    inp.seq_id      = 0;
+    inp.prompt      = text;
+    inp.prompt_len  = strlen(text);
+    inp.speaker_ref = nullptr;
+    inp.lang        = lang;
+    inp.top_k       = 40;
+    inp.top_p       = 0.95f;
+    inp.seed        = UINT32_MAX;
+    inp.out_type    = MTMD_HELPER_GEN_AUDIO_OUTTYPE_PCM;
+
+    if (gen.set_input(&inp) != 0) {
+        LOGE("TTS Stream: set_input failed");
+        env->ReleaseStringUTFChars(text_j, text);
+        env->ReleaseStringUTFChars(lang_j, lang);
+        return JNI_FALSE;
+    }
+
+    for (;;) {
+        int32_t ret = gen.step_prompt(512);
+        if (ret < 0) {
+            LOGE("TTS Stream: prompt processing failed");
+            env->ReleaseStringUTFChars(text_j, text);
+            env->ReleaseStringUTFChars(lang_j, lang);
+            return JNI_FALSE;
+        }
+        if (ret == 0) break;
+    }
+
+    auto sample_semantic = [&]() -> llama_token {
+        llama_token t = llama_sampler_sample(g_tts.smpl, g_tts.ctx, -1);
+        llama_sampler_accept(g_tts.smpl, t);
+        return t;
+    };
+
+    const int max_frames = 150;
+    int n_frames = 0;
+    llama_token sampled = sample_semantic();
+    const float* h_state = llama_get_embeddings_ith(g_tts.ctx, -1);
+
+    int64_t t_gen_start = llama_time_us();
+    bool stop = false;
+    size_t last_sample_offset = 0;
+
+    auto dispatch_pcm_chunks = [&](bool /* is_final */) {
+        int32_t sample_rate = 0;
+        const char* data = nullptr;
+        size_t data_len = 0;
+        int64_t n_samples = 0;
+        if (gen.get_output(&sample_rate, &data, &data_len, &n_samples) == 0 && n_samples > (int64_t)last_sample_offset) {
+            size_t new_samples = (size_t)n_samples - last_sample_offset;
+            const float* pcm_floats = (const float*)data;
+            std::vector<int16_t> pcm16(new_samples);
+            for (size_t i = 0; i < new_samples; ++i) {
+                float s = pcm_floats[last_sample_offset + i];
+                float clamped = std::max(-1.0f, std::min(1.0f, s));
+                pcm16[i] = (int16_t)(clamped * 32767.0f);
+            }
+            last_sample_offset = (size_t)n_samples;
+
+            jshortArray j_pcm = env->NewShortArray((jsize)new_samples);
+            env->SetShortArrayRegion(j_pcm, 0, (jsize)new_samples, (const jshort*)pcm16.data());
+            env->CallVoidMethod(callback, cb_on_pcm, j_pcm);
+            env->DeleteLocalRef(j_pcm);
+            LOGI("TTS Stream: Dispatched %zu PCM samples (%.2fs audio) at frame %d",
+                 new_samples, (double)new_samples / 24000.0, n_frames);
+        }
+    };
+
+    while (!stop && n_frames < max_frames) {
+        const float* h_next = nullptr;
+        if (gen.step_gen(sampled, h_state, &h_next, &stop) != 0) {
+            LOGE("TTS Stream: step_gen failed at frame %d", n_frames);
+            break;
+        }
+        if (!h_next) break;
+
+        n_frames++;
+        h_state = h_next;
+        sampled = sample_semantic();
+
+        // Check and dispatch streaming audio every 25 frames (~2s audio)
+        if (n_frames % 25 == 0) {
+            dispatch_pcm_chunks(false);
+        }
+    }
+
+    // Final flush
+    dispatch_pcm_chunks(true);
+
+    double t_gen_s = (llama_time_us() - t_gen_start) / 1e6;
+    LOGI("TTS Stream: Complete: %d frames in %.2fs (%.1f fps), total %zu samples (%.2fs audio)",
+         n_frames, t_gen_s, n_frames > 0 ? (n_frames / t_gen_s) : 0.0,
+         last_sample_offset, (double)last_sample_offset / 24000.0);
+
+    env->ReleaseStringUTFChars(text_j, text);
+    env->ReleaseStringUTFChars(lang_j, lang);
+    return JNI_TRUE;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_example_qmx_1cpu_InferenceBridge_nativeTtsFree(
         JNIEnv* /* env */,

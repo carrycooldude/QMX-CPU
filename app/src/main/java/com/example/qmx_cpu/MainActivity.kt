@@ -1,6 +1,8 @@
 package com.example.qmx_cpu
 
-import android.media.MediaPlayer
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.os.Bundle
 import android.system.Os
 import android.view.View
@@ -45,7 +47,7 @@ class MainActivity : AppCompatActivity() {
     private var isTtsReady = false
     private var isTtsSpeaking = false
     private var isTtsGenerating = false
-    private var mediaPlayer: MediaPlayer? = null
+    private var audioTrack: AudioTrack? = null
 
     // Track the current generation job for clean cancellation
     private var generationJob: Job? = null
@@ -167,10 +169,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (isTtsSpeaking) {
-            mediaPlayer?.stop()
-            mediaPlayer?.release()
-            mediaPlayer = null
-            isTtsSpeaking = false
+            stopAudioTrack()
             return
         }
         if (isTtsGenerating) {
@@ -197,39 +196,77 @@ class MainActivity : AppCompatActivity() {
         }
 
         isTtsGenerating = true
-        Toast.makeText(this, "🔊 Generating speech with Qwen3-TTS...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "🔊 Streaming Qwen3-TTS audio...", Toast.LENGTH_SHORT).show()
 
         lifecycleScope.launch(Dispatchers.IO) {
-            val wavPath = File(cacheDir, "tts_output_${System.currentTimeMillis()}.wav").absolutePath
+            val sampleRate = 24000
+            val channelConfig = AudioFormat.CHANNEL_OUT_MONO
+            val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+            val minBuf = AudioTrack.getMinBufferSize(sampleRate, channelConfig, audioFormat)
 
-            val success = InferenceBridge.nativeTtsGenerate(speechText, "en", wavPath)
+            try {
+                audioTrack?.release()
+                audioTrack = AudioTrack.Builder()
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
+                    )
+                    .setAudioFormat(
+                        AudioFormat.Builder()
+                            .setEncoding(audioFormat)
+                            .setSampleRate(sampleRate)
+                            .setChannelMask(channelConfig)
+                            .build()
+                    )
+                    .setBufferSizeInBytes(minBuf * 4)
+                    .setTransferMode(AudioTrack.MODE_STREAM)
+                    .build()
+                audioTrack?.play()
+                isTtsSpeaking = true
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+
+            val success = InferenceBridge.nativeTtsGenerateStream(
+                speechText,
+                "en",
+                object : PcmCallback {
+                    override fun onPcmChunk(pcmData: ShortArray) {
+                        if (isTtsSpeaking && audioTrack != null) {
+                            audioTrack?.write(pcmData, 0, pcmData.size)
+                        }
+                    }
+                }
+            )
 
             withContext(Dispatchers.Main) {
                 isTtsGenerating = false
-                if (success && File(wavPath).exists()) {
-                    try {
-                        mediaPlayer?.release()
-                        mediaPlayer = MediaPlayer().apply {
-                            setDataSource(wavPath)
-                            prepare()
-                            setOnCompletionListener {
-                                isTtsSpeaking = false
-                                it.release()
-                                mediaPlayer = null
-                                File(wavPath).delete()
-                            }
-                            start()
-                        }
-                        isTtsSpeaking = true
-                    } catch (e: Exception) {
-                        Toast.makeText(this@MainActivity, "Playback failed: ${e.message}", Toast.LENGTH_SHORT).show()
-                        File(wavPath).delete()
-                    }
+                if (!success) {
+                    Toast.makeText(this@MainActivity, "TTS streaming failed", Toast.LENGTH_SHORT).show()
+                    stopAudioTrack()
                 } else {
-                    Toast.makeText(this@MainActivity, "TTS generation failed", Toast.LENGTH_SHORT).show()
+                    // Audio continues playing buffer; schedule stop after estimated duration
+                    lifecycleScope.launch {
+                        delay(2500)
+                        stopAudioTrack()
+                    }
                 }
             }
         }
+    }
+
+    private fun stopAudioTrack() {
+        try {
+            audioTrack?.stop()
+            audioTrack?.release()
+        } catch (e: Exception) {
+            // ignore
+        }
+        audioTrack = null
+        isTtsSpeaking = false
+        isTtsGenerating = false
     }
 
     private fun loadModelAsync() {
@@ -307,10 +344,7 @@ class MainActivity : AppCompatActivity() {
         btnSend.isEnabled = false
 
         // Stop any ongoing TTS playback when sending a new message
-        mediaPlayer?.stop()
-        mediaPlayer?.release()
-        mediaPlayer = null
-        isTtsSpeaking = false
+        stopAudioTrack()
 
         // Add user message
         messages.add(ChatMessage(promptText, true))
@@ -388,8 +422,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         super.onDestroy()
         generationJob?.cancel()
-        mediaPlayer?.release()
-        mediaPlayer = null
+        stopAudioTrack()
         InferenceBridge.nativeTtsFree()
         InferenceBridge.nativeFree()
     }

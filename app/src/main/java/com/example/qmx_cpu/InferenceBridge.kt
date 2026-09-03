@@ -4,6 +4,10 @@ interface TokenCallback {
     fun onToken(piece: String)
 }
 
+interface PcmCallback {
+    fun onPcmChunk(pcmData: ShortArray)
+}
+
 object InferenceBridge {
     init {
         try {
@@ -29,5 +33,6 @@ object InferenceBridge {
     // Qwen3-TTS
     external fun nativeTtsInit(backbonePath: String, mmprojPath: String, nThreads: Int): Boolean
     external fun nativeTtsGenerate(text: String, lang: String, outputWavPath: String): Boolean
+    external fun nativeTtsGenerateStream(text: String, lang: String, callback: PcmCallback): Boolean
     external fun nativeTtsFree()
 }
