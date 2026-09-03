@@ -360,6 +360,10 @@ Java_com_example_qmx_1cpu_InferenceBridge_nativeTtsGenerate(
 
     LOGI("TTS: Generating speech for: '%.80s...' lang=%s output=%s", text, lang, output_path);
 
+    // Clear KV memory from previous generations so prompt evaluation starts at position 0
+    llama_memory_clear(llama_get_memory(g_tts.ctx), true);
+    llama_sampler_reset(g_tts.smpl);
+
     // Set up audio generation using the mtmd C++ wrapper
     mtmd_helper::gen_audio gen(g_tts.ctx, g_tts.mctx);
 
@@ -494,6 +498,10 @@ Java_com_example_qmx_1cpu_InferenceBridge_nativeTtsGenerateStream(
     const char* lang = env->GetStringUTFChars(lang_j, nullptr);
 
     LOGI("TTS Stream: Generating PCM for: '%.80s...' lang=%s", text, lang);
+
+    // Clear KV memory from previous generations so prompt evaluation starts at position 0
+    llama_memory_clear(llama_get_memory(g_tts.ctx), true);
+    llama_sampler_reset(g_tts.smpl);
 
     jclass cb_class = env->GetObjectClass(callback);
     jmethodID cb_on_pcm = env->GetMethodID(cb_class, "onPcmChunk", "([S)V");
